@@ -1,0 +1,70 @@
+# Architecture
+
+```mermaid
+flowchart LR
+  Popup[Extension popup] --> Source{EmailSourceAdapter}
+  Source --> Mock[MockEmailSourceAdapter]
+  Source --> Gmail[GmailEmailSourceAdapter]
+  Gmail --> Content[Selected-message content script]
+  Popup --> Worker[MV3 service worker]
+  Content --> Worker
+  Worker --> Open[POST email-open]
+  Worker --> Analyze[POST analyze-email v1.0]
+  Open --> Interaction[EmailInteractionService]
+  Interaction --> DB[(SQLite / future Supabase)]
+  Analyze --> Interface[Analyzer interface]
+  Interface --> Rules[RuleBasedAnalyzer]
+  Dashboard[React dashboard] --> DBAPI[Tracked-email API]
+  DBAPI --> DB
+```
+
+Gmail DOM assumptions are confined to `gmailSelectors.ts` and `GmailEmailSourceAdapter`. The popup, service worker, API client, and backend receive typed metadata and do not know Gmail selectors. Mock mode follows the same contracts and remains the automated-test default.
+
+## Duplicate prevention
+
+The content script debounces mutations by 600 ms and tracks each visible message ID once until another message is selected. FastAPI separately ignores the same user/message `email_open` within five seconds. Reopening later remains countable.
+
+## Analysis pipeline
+
+`Analyzer` currently resolves to `RuleBasedAnalyzer`. `/api/v1/analyze-email` accepts schema version `1.0` and returns behaviors, recommendation, risk, classification, and `modelVersion: null`. Future BRL, text/URL feature extractors, ML classifier, and explanation generator should be introduced behind this boundary. Rule-based results must never be called ML predictions.
+
+See [gmail-integration.md](gmail-integration.md) for operational limitations.
+
+## SE-BRL API contract boundary
+
+The backend includes a strict, frozen Pydantic representation of the existing
+SE-BRL structural result envelope and a domain-to-Pydantic adapter. The adapter
+accepts only an immutable `ml.se_brl.ResultEnvelope`, uses the domain serializer,
+and revalidates versions, canonical ordering, statuses, and cross-field
+compatibility at the backend boundary.
+
+`GET /api/v1/se-brl/status` exposes this internal fail-closed SE-BRL foundation.
+For the content-bearing email workflow, it currently returns only
+`not_evaluated`. This is a readiness/status boundary, not a phishing-analysis
+endpoint. The existing `/api/v1/analyze-email` endpoint remains rule-based and
+separate.
+
+## Internal SE-BRL orchestration
+
+An internal backend service sits between future FastAPI routing and the existing
+domain-to-Pydantic adapter. It constructs only `not_evaluated`,
+`review_required`, and `failed` responses with canonical identifiers and fixed,
+non-sensitive limitations. No completed analytical path exists.
+
+The internal [pre-training analytical pipeline](se-brl-pretraining.md) now adds
+artifact preprocessing, conventional fit/transform feature interfaces, versioned
+candidate indicator rules, evidence locators, BRL placeholders, E1/E2/E3 feature
+boundaries, and future classifier/trainer interfaces. It reuses the codebook,
+assessment resolver, and fail-closed envelope without changing the existing API.
+
+Canonical dataset adapter records now preserve provenance outside the API envelope
+and keep phishing source labels separate from behavioral annotations. Supplied
+group metadata can be checked against existing split manifests. Evidence-aware
+trust detectors require independent references; versioned feature configuration
+manifests, sparse-compatible feature storage, and an internal readiness report
+prepare the dataset phase without training or generating learned outputs.
+
+Dataset audits, validated behavioral models, calibration, thresholds, completed
+outputs, extension integration, and dashboard integration remain deferred.
+Rule evidence is neither learned behavioral probability nor final phishing
+probability. The SE-BRL model is not complete.
