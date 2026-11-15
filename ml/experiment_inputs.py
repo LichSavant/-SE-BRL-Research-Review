@@ -11,6 +11,7 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from enum import Enum
 import re
+import unicodedata
 from types import MappingProxyType
 from typing import Protocol
 
@@ -22,6 +23,19 @@ ADAPTER_CONTRACT_VERSION = "0.1.0"
 
 class InputContractError(ValueError):
     """Stable errors deliberately omit source values and message content."""
+
+
+def reject_excluded_source_identifiers(*values: str) -> None:
+    """Reject excluded source aliases in metadata, never scan artifact content.
+
+    This is an additional deny rule, not dataset admission or an allowlist.
+    It does not identify renamed payloads or authenticate supplied provenance.
+    """
+    for value in values:
+        _identifier(value)
+        normalized = re.sub(r'[^a-z0-9]', '', unicodedata.normalize('NFKC', value).casefold())
+        if any(alias in normalized for alias in ('spaphish', 'spafish')):
+            raise InputContractError('excluded_source_identifier')
 
 
 def _identifier(value: object) -> str:
@@ -82,6 +96,7 @@ class DatasetIdentity:
     def __post_init__(self) -> None:
         for value in (self.dataset_id, self.snapshot_id, self.provenance_reference):
             _identifier(value)
+        reject_excluded_source_identifiers(self.dataset_id, self.snapshot_id, self.provenance_reference)
 
 
 @dataclass(frozen=True, slots=True)
@@ -290,8 +305,9 @@ def validate_supplied_partitions(assignments: Iterable[PartitionAssignment], *, 
 BOOKKEEPING = frozenset({
     "target", "label", "result", "source_label", "native_label", "observation_id", "record_id",
     "original_record_id", "original_hash", "hash", "body_hash", "feature_hash", "group_id",
-    "partition", "cv_fold", "source_dataset", "source_row_id", "snapshot_id", "dataset_id",
+    "partition", "cv_fold", "source_dataset", "source_row_id", "source_file", "snapshot_sha256", "snapshot_id", "dataset_id",
     "language", "label_reference", "contract_version", "provenance", "provenance_reference", "dataset", "source",
+    "filename",  # Native PhiUSIIL record identifier; never a predictor.
 })
 
 

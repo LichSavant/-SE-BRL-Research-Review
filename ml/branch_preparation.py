@@ -17,16 +17,20 @@ from ml.development_experiments import (
     BEHAVIORAL_FILES, DEVELOPMENT_FILES, METADATA, _bit, _within, behavioral_columns,
 )
 from ml.experiment_inputs import InputContractError
+from ml.metadata import canonical_json
 from ml.notebook_contracts import (
     CONTRACT_VERSION, assert_new_outputs, canonical_notebook_codebook,
     technical_indicator_columns, validate_feature_boundary, validate_metadata_alignment,
 )
 
+# Preserve the historical combined selection for existing notebook callers.
+# Web is selected explicitly; adding support must not add a new input dependency.
 ALL_BRANCHES = ("Email", "PhiUSIIL", "UCI")
+SUPPORTED_BRANCHES = ALL_BRANCHES + ("Web",)
 PREPROCESSED_FILES = {"Email": "email_preprocessed.csv", "PhiUSIIL": "phiusiil_preprocessed.csv",
-                      "UCI": "uci_phishing_websites_preprocessed.csv"}
+                      "UCI": "uci_phishing_websites_preprocessed.csv", "Web": "web_preprocessed.csv"}
 PARTITION_FILES = {"Email": "email_partition_manifest.csv", "PhiUSIIL": "phiusiil_partition_manifest.csv",
-                   "UCI": "uci_partition_manifest.csv"}
+                   "UCI": "uci_partition_manifest.csv", "Web": "web_partition_manifest.csv"}
 SHARED_OUTPUTS = (
     "results/feature_extraction/evidence/indicator_evidence.csv",
     "results/feature_extraction/sebrl_codebook.csv",
@@ -39,7 +43,7 @@ SHARED_OUTPUTS = (
 
 def select_branches(branches) -> tuple[str, ...]:
     if (type(branches) is not tuple or not branches
-            or any(type(name) is not str or name not in ALL_BRANCHES for name in branches)
+            or any(type(name) is not str or name not in SUPPORTED_BRANCHES for name in branches)
             or len(set(branches)) != len(branches)):
         raise InputContractError("explicit_unique_preparation_branches_required")
     return branches
@@ -86,7 +90,7 @@ def _same_source_rows(before, after):
         raise InputContractError("preparation_changed_source_fields")
 
 
-def prepare_selected_branches(inputs, branches, *, prepare_email=None) -> dict:
+def prepare_selected_branches(inputs, branches, *, prepare_email=None, prepare_web=None) -> dict:
     """Dispatch Email only when explicitly selected; preserve original fields.
 
     The callback owns the unchanged Email rules and their existing freeze gate.
@@ -96,12 +100,16 @@ def prepare_selected_branches(inputs, branches, *, prepare_email=None) -> dict:
     _selected_mapping(inputs, branches)
     if "Email" in branches and not callable(prepare_email):
         raise InputContractError("selected_email_preparer_required")
+    if "Web" in branches and not callable(prepare_web):
+        raise InputContractError("selected_web_preparer_required")
     result = {}
     for name in branches:
         original = tuple(deepcopy(dict(row)) for row in inputs[name])
         validate_feature_boundary(original, dataset=name, development_only=True)
         if name == "Email":
             prepared = tuple(prepare_email(deepcopy(original)))
+        elif name == "Web":
+            prepared = tuple(prepare_web(deepcopy(original)))
         else:
             derived = technical_indicator_columns(name)
             for dimension in canonical_notebook_codebook():
@@ -121,7 +129,7 @@ def _csv_bytes(rows):
     stream = io.StringIO(newline="")
     writer = csv.DictWriter(stream, fieldnames=tuple(rows[0]))
     writer.writeheader()
-    writer.writerows(rows)
+    writer.writerows({k: canonical_json(v) if isinstance(v, (list, tuple, Mapping)) else v for k, v in row.items()} for row in rows)
     return stream.getvalue().encode("utf-8")
 
 
@@ -159,7 +167,7 @@ def export_selected_handoff(run_root: Path, branches, development, behavioral, *
             if any(row[key] != vector[key] for key in METADATA):
                 raise InputContractError("behavioral_metadata_mismatch")
             bits = tuple(_bit(vector[key]) for key in behavioral_columns())
-            if any(s > a for s, a in zip(bits[:4], bits[4:])) or (name != "Email" and any(bits)):
+            if any(s > a for s, a in zip(bits[:4], bits[4:])) or (name not in {"Email", "Web"} and any(bits)):
                 raise InputContractError("invalid_behavioral_preparation_values")
         main = "data/processed/features/development/" + DEVELOPMENT_FILES[name]
         behavior = "data/processed/features/sebrl/" + BEHAVIORAL_FILES[name]

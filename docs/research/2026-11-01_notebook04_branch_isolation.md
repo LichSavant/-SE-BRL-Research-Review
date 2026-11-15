@@ -6,7 +6,7 @@ historical results. D6 actual-data acceptance and D10/D11 remain incomplete.
 
 ## Initial state and verified dependency
 
-Checkout: `C:/Users/Dhanwil/Desktop/Projects/Thesis_Prototype_Git`.
+Checkout: `<user-profile>/Desktop/Projects/Thesis_Prototype_Git`.
 Branch/HEAD: `main`, `6bded57d38e9b83ba718d7795b97e2130128c23f`.
 Upstream: `origin/main`. Remote configuration remains the old prototype URL for
 `origin` and the thesis URL for `se-brl`; neither was changed. Initial status:
@@ -132,7 +132,7 @@ and the 97 D9 tests. No pre-existing assertion failure was observed.
 All Python invocations used `-B`, `PYTHONDONTWRITEBYTECODE=1`,
 `DATABASE_URL=sqlite:///:memory:` and `-p no:cacheprovider`. TEMP/TMP and pytest
 basetemps were under:
-`C:/Users/Dhanwil/AppData/Local/Temp/sebrl-branch-isolation-73k0w530`.
+`<user-profile>/AppData/Local/Temp/sebrl-branch-isolation-73k0w530`.
 `<task-temp>` below denotes that directory.
 
 | Command | Result |

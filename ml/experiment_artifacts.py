@@ -10,7 +10,7 @@ from pathlib import Path
 import tempfile
 
 from ml.development_experiments import _within, _manifest_object
-from ml.development_runner import write_synthetic_bundle, verify_synthetic_bundle
+from ml.development_runner import _write_result_bundle, _verify_result_bundle
 from ml.experiment_engine import ENGINE_VERSION, FittedSigmoid
 from ml.experiment_inputs import InputContractError
 from ml.metadata import canonical_json, fingerprint
@@ -19,7 +19,7 @@ from ml.model_persistence import save_fold_artifact, load_fold_artifact
 BUNDLE_VERSION = "nested-synthetic-artifacts-0.1.0"
 
 
-def write_nested_bundle(directory, result, fitted, *, code_reference, code_hashes):
+def write_nested_bundle(directory, result, fitted, *, code_reference, code_hashes, execution_context=None):
     """Stage privately, then exclusive files/manifest-last; rollback owned files.
 
     Contains only explicitly returned outer-fold models; not a selected final
@@ -28,8 +28,12 @@ def write_nested_bundle(directory, result, fitted, *, code_reference, code_hashe
     directory = Path(directory)
     if directory.exists() or not directory.parent.is_dir():
         raise InputContractError("unused_run_directory_and_existing_parent_required")
-    if (result.get("engine_version") != ENGINE_VERSION or result.get("result_category") != "SYNTHETIC RESULT"
-            or result.get("research_execution") != "BLOCKED"
+    if execution_context is not None:
+        from ml.preflight import require_research_fitting
+        require_research_fitting(execution_context)
+        execution_context.verify_result(result)
+    if (result.get("engine_version") != ENGINE_VERSION
+            or (execution_context is None and (result.get("result_category") != "SYNTHETIC RESULT" or result.get("research_execution") != "BLOCKED"))
             or result.get("request_fingerprint") != fingerprint(result["request"])):
         raise InputContractError("complete_synthetic_nested_result_required")
     reports = {(r["configuration"], r["fold"]): r for r in result["fold_reports"]}
@@ -44,15 +48,16 @@ def write_nested_bundle(directory, result, fitted, *, code_reference, code_hashe
             raise InputContractError("outer_model_state_mismatch")
     with tempfile.TemporaryDirectory(prefix="sebrl-nested-artifacts-") as temporary:
         staging = Path(temporary)
-        write_synthetic_bundle(staging / "results", result, code_reference=code_reference, code_hashes=code_hashes)
+        _write_result_bundle(staging / "results", result, code_reference=code_reference, code_hashes=code_hashes, execution_context=execution_context)
         (staging / "models").mkdir()
         models = {}
         for (config, fold), (pipeline, sigmoid, threshold) in supplied.items():
             relative = f"models/{config}-fold-{fold}"
-            digest = save_fold_artifact(staging / relative, pipeline, code_reference=code_reference)
+            digest = save_fold_artifact(staging / relative, pipeline, code_reference=code_reference, execution_context=execution_context)
             models[relative] = {"manifest_sha256": digest, "calibration": sigmoid.state(), "threshold": threshold}
         files = {p.relative_to(staging).as_posix(): p.read_bytes() for p in staging.rglob("*") if p.is_file()}
-        manifest = {"version": BUNDLE_VERSION, "result_category": "SYNTHETIC RESULT", "research_execution": "BLOCKED",
+        manifest = {"version": BUNDLE_VERSION, "result_category": result["result_category"], "research_execution": result["research_execution"],
+                    "authorization_sha256": result.get("authorization_sha256"),
                     "code_reference": code_reference, "input_fingerprint": result["input_fingerprint"],
                     "request_fingerprint": result["request_fingerprint"], "models": models,
                     "outputs": {n: hashlib.sha256(b).hexdigest() for n, b in files.items()}}
@@ -84,7 +89,7 @@ def write_nested_bundle(directory, result, fitted, *, code_reference, code_hashe
         return hashlib.sha256(body).hexdigest()
 
 
-def load_nested_bundle(directory, *, expected_manifest_sha256, max_bytes):
+def load_nested_bundle(directory, *, expected_manifest_sha256, max_bytes, execution_context=None):
     """Digest-checked complete bundle; verify all hashes before model loading.
 
     max_bytes limits the entire encoded bundle plus each decompressed model
@@ -103,8 +108,15 @@ def load_nested_bundle(directory, *, expected_manifest_sha256, max_bytes):
         raise InputContractError("run_manifest_digest_mismatch")
     try:
         manifest = json.loads(body, object_pairs_hook=_manifest_object)
-        if (manifest["version"] != BUNDLE_VERSION or manifest["result_category"] != "SYNTHETIC RESULT"
-                or manifest["research_execution"] != "BLOCKED"):
+        if execution_context is not None:
+            from ml.preflight import require_research_fitting
+            require_research_fitting(execution_context)
+            scope_valid = (manifest["result_category"] == "RESEARCH RESULT"
+                           and manifest["research_execution"] == "AUTHORIZED DEVELOPMENT ONLY"
+                           and manifest["authorization_sha256"] == execution_context.authorization_sha256)
+        else:
+            scope_valid = manifest["result_category"] == "SYNTHETIC RESULT" and manifest["research_execution"] == "BLOCKED"
+        if manifest["version"] != BUNDLE_VERSION or not scope_valid:
             raise InputContractError("nested_bundle_scope_mismatch")
         expected = manifest["outputs"]
         actual = {p.relative_to(directory).as_posix() for p in directory.rglob("*") if p.is_file()}
@@ -118,7 +130,7 @@ def load_nested_bundle(directory, *, expected_manifest_sha256, max_bytes):
                 raise InputContractError("nested_bundle_resource_limit")
             if hashlib.sha256(path.read_bytes()).hexdigest() != digest:
                 raise InputContractError("nested_bundle_payload_mismatch")
-        result = verify_synthetic_bundle(directory / "results")
+        result = _verify_result_bundle(directory / "results", execution_context)
         if (result["input_fingerprint"] != manifest["input_fingerprint"]
                 or result["request_fingerprint"] != manifest["request_fingerprint"]):
             raise InputContractError("nested_bundle_result_mismatch")
@@ -134,7 +146,8 @@ def load_nested_bundle(directory, *, expected_manifest_sha256, max_bytes):
             report = reports[key]
             if entry["calibration"] != report["calibration"] or entry["threshold"] != report["threshold"]:
                 raise InputContractError("nested_calibration_or_threshold_mismatch")
-            pipeline = load_fold_artifact(_within(directory, name), expected_manifest_sha256=entry["manifest_sha256"], max_bytes=max_bytes)
+            pipeline = load_fold_artifact(_within(directory, name), expected_manifest_sha256=entry["manifest_sha256"], max_bytes=max_bytes,
+                                          execution_context=execution_context)
             if pipeline.audit_record() != report["pipeline"]:
                 raise InputContractError("nested_fitted_pipeline_mismatch")
             fitted.append((config, int(fold), pipeline, FittedSigmoid.from_state(entry["calibration"]), entry["threshold"]))

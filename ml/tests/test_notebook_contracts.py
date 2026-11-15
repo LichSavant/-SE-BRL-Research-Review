@@ -225,7 +225,8 @@ def test_codebook_ids_and_order_match_existing_canonical_contract():
     assert {i for d in actual.values() for i in d["indicators"]} == {
         i["id"] for d in book["dimensions"] for i in d["indicators"]}
     assert "credential_sensitive_data_request" in actual["requested_action_consequence"]["indicators"]
-    assert set(DATASET_ROLES) == {"Email", "PhiUSIIL", "UCI"}
+    # Approved Table 4.7 includes content-bearing Web separately from U1.
+    assert set(DATASET_ROLES) == {"Email", "Web", "PhiUSIIL", "UCI"}
 
 
 @pytest.mark.parametrize("name", ["source_label", "source_row_id", "group_id", "partition", "target",

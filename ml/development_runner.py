@@ -111,7 +111,7 @@ def _validate_dataset(dataset):
             raise InputContractError("binary_behavioral_value_required")
         if any(s > a for s, a in zip(row.behavioral[:4], row.behavioral[4:])):
             raise InputContractError("support_without_availability")
-        if dataset.specification.dataset != "Email" and any(row.behavioral):
+        if dataset.specification.dataset not in {"Email", "Web"} and any(row.behavioral):
             raise InputContractError("technical_behavioral_evidence_forbidden")
         for column, value in zip(dataset.specification.conventional, row.conventional):
             if value is not None:
@@ -137,8 +137,8 @@ def dataset_fingerprint(dataset):
 
 def dimension_ablations(dataset):
     _validate_dataset(dataset)
-    if dataset.specification.dataset != "Email":
-        raise InputContractError("behavioral_ablation_requires_email_branch")
+    if dataset.specification.dataset not in {"Email", "Web"}:
+        raise InputContractError("behavioral_ablation_requires_content_branch")
     return {d: (f"{d}_supported", f"{d}_available") for d in canonical_notebook_codebook()}
 
 
@@ -301,13 +301,23 @@ def slice_synthetic_metrics(result, configuration, *, slices_by_id):
 
 
 def write_synthetic_bundle(directory, result, *, code_reference, code_hashes):
+    if (result.get("result_category") != "SYNTHETIC RESULT" or result.get("research_execution") != "BLOCKED"):
+        raise InputContractError("synthetic_result_required")
+    return _write_result_bundle(directory, result, code_reference=code_reference, code_hashes=code_hashes)
+
+
+def _write_result_bundle(directory, result, *, code_reference, code_hashes, execution_context=None):
     """Exclusive leaf directory; manifest last; no raw predictor text or values.
 
     The parent must exist. Ordinary IO rollback removes only this call's files
     and leaf directory. Process termination is not an atomic transaction.
     """
     require_text(code_reference)
-    if (result.get("result_category") != "SYNTHETIC RESULT"
+    if execution_context is not None:
+        from ml.preflight import require_research_fitting
+        require_research_fitting(execution_context)
+        execution_context.verify_result(result)
+    elif (result.get("result_category") != "SYNTHETIC RESULT"
             or result.get("research_execution") != "BLOCKED"):
         raise InputContractError("synthetic_result_required")
     if not isinstance(code_hashes, Mapping) or not code_hashes:
@@ -321,7 +331,7 @@ def write_synthetic_bundle(directory, result, *, code_reference, code_hashes):
     writer.writeheader()
     writer.writerows(rows)
     payloads = {"oof_predictions.csv": stream.getvalue().encode("utf-8"),
-                "metrics.json": canonical_json({"result_category": "SYNTHETIC RESULT",
+                "metrics.json": canonical_json({"result_category": result["result_category"],
                     "fold_reports": result["fold_reports"], "pooled_metrics": result["pooled_metrics"]}).encode("utf-8")}
     manifest = {k: v for k, v in result.items() if k not in {"oof_predictions", "fold_reports", "pooled_metrics"}}
     manifest.update(code_reference=code_reference, code_hashes=dict(code_hashes),
@@ -351,14 +361,23 @@ def write_synthetic_bundle(directory, result, *, code_reference, code_hashes):
 
 
 def verify_synthetic_bundle(directory):
+    return _verify_result_bundle(directory)
+
+
+def _verify_result_bundle(directory, execution_context=None):
     """Read only the three fixed synthetic files; hashes establish identity only."""
     directory = Path(directory)
     try:
         manifest = json.loads(_within(directory, "manifest.json").read_text(encoding="utf-8"),
                               object_pairs_hook=_manifest_object)
         freeze_json(manifest)
-        if (manifest["result_category"] != "SYNTHETIC RESULT" or manifest["research_execution"] != "BLOCKED"
-                or set(manifest["outputs"]) != {"oof_predictions.csv", "metrics.json"}):
+        if execution_context is not None:
+            from ml.preflight import require_research_fitting
+            require_research_fitting(execution_context)
+            execution_context.verify_result(manifest)
+        elif manifest["result_category"] != "SYNTHETIC RESULT" or manifest["research_execution"] != "BLOCKED":
+            raise InputContractError("invalid_synthetic_manifest")
+        if set(manifest["outputs"]) != {"oof_predictions.csv", "metrics.json"}:
             raise InputContractError("invalid_synthetic_manifest")
         import re
         for name, expected in manifest["outputs"].items():

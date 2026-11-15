@@ -1,3 +1,11 @@
+# SE-BRL engineering review
+
+Latest sanitized engineering update: [16 November 2026](docs/engineering-completion-2026-11-16.md).
+Portable no-fit verification: [setup and execution](tools/verification/README.md).
+Research inference is not validated; datasets, model artifacts and private verification evidence are not included.
+
+---
+
 # Phishing Defense System
 
 Working thesis prototype for the **SE-BRL: Modality-Aware Social Engineering Behavior Representation Architecture**.

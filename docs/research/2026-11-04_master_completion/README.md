@@ -24,7 +24,7 @@ Earlier research/acceptance packets are preserved and referenced, not rewritten.
 
 ## Independently checked repository and environment
 
-Checkout `C:/Users/Dhanwil/Desktop/Projects/Thesis_Prototype_Git`;
+Checkout `<user-profile>/Desktop/Projects/Thesis_Prototype_Git`;
 branch main; HEAD `6bded57d38e9b83ba718d7795b97e2130128c23f`;
 upstream origin/main. origin is configured to Thesis_Protoype_Test.git and se-brl
 to CS4101-Thesis2-SE-BRL.git. No synchronization, remote/config change, commit,

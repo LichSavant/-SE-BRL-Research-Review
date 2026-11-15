@@ -142,7 +142,7 @@ class FoldClassifier:
         if (not isinstance(dictionary, DevelopmentSpecification) or not isinstance(model, ClassifierSpecification)
                 or not isinstance(preprocessing, PreprocessingSpecification)):
             raise InputContractError("typed_classifier_specifications_required")
-        allowed = ("E1", "E2", "E3") if dictionary.dataset == "Email" else ("U1",)
+        allowed = ("E1", "E2", "E3") if dictionary.dataset in {"Email", "Web"} else ("U1",)
         if configuration not in allowed:
             raise InputContractError("configuration_branch_mismatch")
         self.dictionary, self.model, self.preprocessing, self.configuration = dictionary, model, preprocessing, configuration
@@ -285,7 +285,7 @@ def classifier_factory(dictionary, model, preprocessing):
     # Validate now even if a caller supplies no folds, without importing libraries.
     if not isinstance(dictionary, DevelopmentSpecification):
         raise InputContractError("typed_classifier_specifications_required")
-    FoldClassifier(dictionary, model, preprocessing, "E1" if dictionary.dataset == "Email" else "U1")
+    FoldClassifier(dictionary, model, preprocessing, "E1" if dictionary.dataset in {"Email", "Web"} else "U1")
     def factory(family, configuration, fold, seed, parameters):
         if (family != model.family or seed != model.seed or freeze_json(parameters) != model.parameters
                 or type(fold) is not int or fold not in range(1, 6)):

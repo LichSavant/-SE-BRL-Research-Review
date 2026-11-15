@@ -54,12 +54,44 @@ class SelectionPolicy:
                 or len(set(self.efficiency_order)) != len(self.efficiency_order)
                 or set(self.efficiency_order) != {"p95_batch_ms", "throughput_artifacts_per_second", "measured_memory_bytes_max", "serialized_model_bytes"}):
             raise InputContractError("explicit_complete_tie_orders_required")
-        if type(self.protocol_reference) is not str or not self.protocol_reference.startswith("synthetic:"):
-            raise InputContractError("synthetic_selection_reference_required")
+        if type(self.protocol_reference) is not str or not self.protocol_reference.startswith(("synthetic:", "research:")):
+            raise InputContractError("scoped_selection_reference_required")
         object.__setattr__(self, "hard_limits", freeze_json(self.hard_limits))
 
 
 def select_synthetic_family(candidates, policy):
+    if not isinstance(policy, SelectionPolicy) or not policy.protocol_reference.startswith("synthetic:"):
+        raise InputContractError("synthetic_selection_reference_required")
+    return _select_family(candidates, policy)
+
+
+def select_research_family(candidates, policy, *, execution_contexts):
+    """Full accepted four-family evidence; never runs candidates on sealed data."""
+    from ml.preflight import require_research_fitting
+    if (not isinstance(policy, SelectionPolicy) or not policy.protocol_reference.startswith("research:")
+            or policy.families != CLASSIFIER_FAMILIES or policy.resamples != 2000 or policy.confidence != .95
+            or not isinstance(execution_contexts, Mapping) or set(execution_contexts) != set(policy.families)
+            or set(candidates) != set(policy.families)):
+        raise InputContractError("complete_accepted_four_family_selection_required")
+    for family, context in execution_contexts.items():
+        require_research_fitting(context)
+        if context._state.get("boundary") != "E-development-fitting-only":
+            raise InputContractError("principal_model_selection_scope_required")
+        context.verify_result(candidates[family]["result"])
+        if candidates[family]["benchmark"].get("authorization_sha256") != context.authorization_sha256:
+            raise InputContractError("accepted_benchmark_authorization_mismatch")
+        from ml.metadata import canonical_json
+        frozen = context.selection_record["policy"]
+        actual = {"families": policy.families, "configuration": policy.configuration, "delta_pr": policy.delta_pr,
+            "resamples": policy.resamples, "confidence": policy.confidence, "seed": policy.seed, "hard_limits": policy.hard_limits,
+            "memory_evidence": policy.memory_evidence, "calibration_order": policy.calibration_order,
+            "efficiency_order": policy.efficiency_order, "protocol_reference": policy.protocol_reference}
+        if canonical_json(frozen) != canonical_json(actual):
+            raise InputContractError("accepted_selection_policy_changed")
+    return _select_family(candidates, policy, research=True)
+
+
+def _select_family(candidates, policy, research=False):
     """Matched OOF evidence -> hard gates -> AP/equivalence -> ties -> freeze.
 
     Each candidate supplies result, benchmark with a common nonempty comparison
@@ -72,12 +104,14 @@ def select_synthetic_family(candidates, policy):
         raise InputContractError("explicit_synthetic_selection_inputs_required")
     indexed, metrics, benchmarks, ranks, excluded = {}, {}, {}, {}, {}
     controls = reference = None
+    category = "RESEARCH RESULT" if research else "SYNTHETIC RESULT"
+    execution = "AUTHORIZED DEVELOPMENT ONLY" if research else "BLOCKED"
     for family, candidate in candidates.items():
         try:
             result, benchmark, rank = candidate["result"], candidate["benchmark"], candidate["simplicity_rank"]
-            if (result["result_category"] != "SYNTHETIC RESULT" or result["research_execution"] != "BLOCKED"
+            if (result["result_category"] != category or result["research_execution"] != execution
                     or result["request"]["family"] != family or type(rank) is not int or rank < 0
-                    or benchmark["result_category"] != "SYNTHETIC RESULT"):
+                    or benchmark["result_category"] != category):
                 raise InputContractError("synthetic_candidate_evidence_required")
             rows = [r for r in result["oof_predictions"] if r["configuration"] == policy.configuration]
             index = {r["observation_id"]: r for r in rows}
@@ -148,7 +182,7 @@ def select_synthetic_family(candidates, policy):
             raise
         except (KeyError, TypeError, ValueError):
             raise InputContractError("incomplete_selection_evidence") from None
-    base = {"result_category": "SYNTHETIC RESULT", "research_execution": "BLOCKED", "excluded": excluded,
+    base = {"result_category": category, "research_execution": execution, "excluded": excluded,
             "policy": {"families": policy.families, "configuration": policy.configuration, "delta_pr": policy.delta_pr, "resamples": policy.resamples,
                 "confidence": policy.confidence, "seed": policy.seed, "hard_limits": policy.hard_limits,
                 "memory_evidence": policy.memory_evidence,
@@ -201,5 +235,5 @@ def select_synthetic_family(candidates, policy):
         contenders = ["logistic_regression"]
         stages.append({"criterion": "final_logistic_regression_preference", "remaining": contenders})
     selected = contenders[0] if len(contenders) == 1 else None
-    return json_value(freeze_json(dict(base, status="synthetic_selection_complete" if selected else "unresolved_final_tie",
+    return json_value(freeze_json(dict(base, status=("research_selection_complete" if research else "synthetic_selection_complete") if selected else "unresolved_final_tie",
                                       selected=selected, tie_stages=stages)))

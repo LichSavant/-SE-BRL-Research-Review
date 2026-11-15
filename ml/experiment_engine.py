@@ -1,8 +1,9 @@
-"""Explicit nested search/calibration/threshold engineering on synthetic inputs.
+"""Shared nested search/calibration/threshold mechanics.
 
 No corpus loader, new partitions, research authorization or default search grid.
 Every split reuses supplied development folds. Numerical settings are required
-caller inputs, never inferred approvals. The research entry guard stays closed.
+caller inputs, never inferred approvals. Research enters only with a verified
+exact-run context; synthetic verification retains its distinct result category.
 """
 from dataclasses import dataclass
 import math
@@ -15,7 +16,7 @@ from ml.evaluation_metrics import binary_metrics, _numbers, _labels
 from ml.experiment_inputs import InputContractError
 from ml.metadata import fingerprint, freeze_json, json_value
 
-ENGINE_VERSION = "synthetic-nested-engine-0.1.0"
+ENGINE_VERSION = "nested-engine-0.2.0"
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,8 +90,8 @@ class NestedSpecification:
         if (type(self.calibration_edges) is not tuple or len(edges) < 2 or edges[0] != 0 or edges[-1] != 1
                 or any(a >= b for a, b in zip(edges, edges[1:]))):
             raise InputContractError("invalid_calibration_edges")
-        if type(self.protocol_reference) is not str or not self.protocol_reference.startswith("synthetic:"):
-            raise InputContractError("explicit_synthetic_protocol_reference_required")
+        if type(self.protocol_reference) is not str or not self.protocol_reference.startswith(("synthetic:", "research:")):
+            raise InputContractError("explicit_scoped_protocol_reference_required")
         if (type(self.omitted_features) is not tuple or any(type(n) is not str for n in self.omitted_features)
                 or len(set(self.omitted_features)) != len(self.omitted_features)):
             raise InputContractError("explicit_unique_omissions_required")
@@ -172,9 +173,23 @@ def choose_training_f1_threshold(labels, probabilities):
 
 
 class _Worker:
-    def __init__(self, dataset, specification, config, names, factory):
+    def __init__(self, dataset, specification, config, names, factory, execution_context=None):
         self.dataset, self.specification, self.config, self.names, self.factory = dataset, specification, config, names, factory
         self.traces, self.fit_count, self.calibration_count = [], 0, 0
+        self.execution_context = execution_context
+        self._population_cache = {}
+
+    def population_evidence(self, rows, name):
+        ids = tuple(r.observation_id for r in rows)
+        if self.execution_context is None:
+            return {name: list(ids)}
+        # Research traces do not repeat enormous ID lists for every grid point.
+        # Actual IDs/folds remain in the immutable D9 input and OOF artifact.
+        key = tuple(sorted({r.fold for r in rows}))
+        if key not in self._population_cache:
+            self._population_cache[key] = (len(ids), fingerprint(sorted(ids)))
+        count, digest = self._population_cache[key]
+        return {name+"_count": count, name+"_set_sha256": digest}
 
     def x(self, rows):
         all_names = tuple(c.name for c in self.dataset.specification.conventional)
@@ -192,6 +207,8 @@ class _Worker:
         return tuple(result)
 
     def fit(self, rows, candidate):
+        if self.execution_context is not None:
+            self.execution_context.before_fit("base", len(rows))
         if set(r.target for r in rows) != {0, 1}:
             raise InputContractError("two_class_training_subset_required")
         pipeline = self.factory(self.dataset.specification, candidate.model, candidate.preprocessing, self.config)
@@ -227,13 +244,13 @@ class _Worker:
                 pipeline = self.fit(train, candidate)
                 scores.extend(self.score(pipeline, valid))
                 y.extend(r.target for r in valid)
-                folds.append({"train_ids": [r.observation_id for r in train], "validation_ids": [r.observation_id for r in valid],
+                folds.append({**self.population_evidence(train, "train_ids"), **self.population_evidence(valid, "validation_ids"),
                               "pipeline": pipeline.audit_record()})
             ap = binary_metrics(y, scores, positive_label=1, threshold=0.)["average_precision"]
             searches.append({"candidate": candidate.identifier, "average_precision": ap, "folds": folds})
         # Candidate tuple order is a predeclared tie rule, never data-dependent.
         winner = max(range(len(searches)), key=lambda i: searches[i]["average_precision"])
-        self.traces.append({"stage": "inner_search", "population_ids": [r.observation_id for r in rows],
+        self.traces.append({"stage": "inner_search", **self.population_evidence(rows, "population_ids"),
                             "candidates": searches, "selected": searches[winner]["candidate"]})
         return self.specification.candidates[winner]
 
@@ -249,9 +266,11 @@ class _Worker:
             scores.extend(self.score(pipeline, valid))
             y.extend(r.target for r in valid)
             ids.extend(r.observation_id for r in valid)
+        if self.execution_context is not None:
+            self.execution_context.before_fit("calibration", len(y))
         sigmoid = FittedSigmoid.fit(scores, y, self.specification.calibration)
         self.calibration_count += 1
-        self.traces.append({"stage": "calibration", "training_ids": ids, "state": sigmoid.state()})
+        self.traces.append({"stage": "calibration", **self.population_evidence(rows, "training_ids"), "state": sigmoid.state()})
         return base, sigmoid, selected.identifier
 
     def threshold(self, rows):
@@ -266,7 +285,7 @@ class _Worker:
             y.extend(r.target for r in valid)
             ids.extend(r.observation_id for r in valid)
         threshold = choose_training_f1_threshold(y, probabilities)
-        self.traces.append({"stage": "threshold", "training_ids": ids, "value": threshold,
+        self.traces.append({"stage": "threshold", **self.population_evidence(rows, "training_ids"), "value": threshold,
                             "policy": "training_crossfit_f1_tie_smallest_observed_probability"})
         return threshold
 
@@ -278,6 +297,20 @@ def run_synthetic_nested_cv(dataset, specification, *, classifier_type=FoldClass
     instances. This function does not authenticate arbitrary callers/data as
     synthetic and is not a security sandbox. No research launcher is exposed.
     """
+    if not isinstance(specification, NestedSpecification) or not specification.protocol_reference.startswith("synthetic:"):
+        raise InputContractError("synthetic_protocol_required")
+    return _run_nested_cv(dataset, specification, classifier_type=classifier_type)
+
+
+def run_research_nested_cv(dataset, specification, *, execution_context):
+    """Exact accepted development run; no alternate estimator callback seam."""
+    from ml.preflight import require_research_fitting
+    require_research_fitting(execution_context)
+    execution_context.bind(dataset, specification)
+    return _run_nested_cv(dataset, specification, classifier_type=FoldClassifier, execution_context=execution_context)
+
+
+def _run_nested_cv(dataset, specification, *, classifier_type, execution_context=None):
     input_hash = dataset_fingerprint(dataset)  # full D9/group contract before fit
     if not isinstance(specification, NestedSpecification) or not callable(classifier_type):
         raise InputContractError("nested_specification_required")
@@ -298,7 +331,7 @@ def run_synthetic_nested_cv(dataset, specification, *, classifier_type=FoldClass
     for config, folds in plans.items():
         for plan in folds:
             names = tuple(n for n in plan.feature_names if n not in specification.omitted_features)
-            worker = _Worker(dataset, specification, config, names, classifier_type)
+            worker = _Worker(dataset, specification, config, names, classifier_type, execution_context)
             train = tuple(r for r in dataset.observations if r.fold != plan.validation_fold)
             valid = tuple(r for r in dataset.observations if r.fold == plan.validation_fold)
             base, sigmoid, selected = worker.calibrated(train)
@@ -312,8 +345,8 @@ def run_synthetic_nested_cv(dataset, specification, *, classifier_type=FoldClass
                             "selected_candidate": selected, "metrics": metrics, "calibration": sigmoid.state(),
                             "pipeline": base.audit_record(), "threshold": threshold})
             traces.append({"configuration": config, "outer_fold": plan.validation_fold,
-                           "outer_train_ids": [r.observation_id for r in train],
-                           "outer_validation_ids": [r.observation_id for r in valid], "events": worker.traces})
+                           **worker.population_evidence(train, "outer_train_ids"),
+                           **worker.population_evidence(valid, "outer_validation_ids"), "events": worker.traces})
             for row, probability in zip(valid, probabilities):
                 oof.append({"configuration": config, "observation_id": row.observation_id, "group_id": row.group_id,
                             "fold": row.fold, "target": row.target, "score": probability, "probability": probability})
@@ -343,10 +376,18 @@ def run_synthetic_nested_cv(dataset, specification, *, classifier_type=FoldClass
                "calibration_edges": specification.calibration_edges, "omitted_features": specification.omitted_features,
                "search_statistic": "pooled_inner_raw_average_precision", "search_tie_rule": "declared_candidate_order",
                "outer_ranking_statistic": "pooled_nested_sigmoid_average_precision"}
-    result = json_value(freeze_json({"result_category": "SYNTHETIC RESULT", "research_execution": "BLOCKED",
+    result = json_value(freeze_json({"result_category": "SYNTHETIC RESULT" if execution_context is None else "RESEARCH RESULT",
+        "research_execution": "BLOCKED" if execution_context is None else "AUTHORIZED DEVELOPMENT ONLY",
         "engine_version": ENGINE_VERSION, "dataset": dataset.specification.dataset, "input_fingerprint": input_hash,
         "request": request, "request_fingerprint": fingerprint(request), "base_fits": base_fits,
         "calibration_fits": calibration_fits, "selection_performed": False, "candidate_search_performed": True,
         "oof_predictions": oof, "fold_reports": reports, "pooled_metrics": pooled,
         "decision_records": decision_records, "traces": traces}))
+    if execution_context is not None:
+        execution_context.check_budget()
+        result["authorization_sha256"] = execution_context.authorization_sha256
+        result["execution_scope"] = execution_context._state.get("boundary")
+        result["accepted_specification_fingerprint"] = execution_context.specification_fingerprint
+        result["exposure_disposition"] = execution_context.exposure_disposition
+        result["final_evaluation_authorized"] = False
     return result, tuple(fitted)

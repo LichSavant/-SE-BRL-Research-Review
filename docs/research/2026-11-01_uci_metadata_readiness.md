@@ -6,7 +6,7 @@ Only this report is created. No dataset-to-feature check, notebook, test, transf
 
 ## 1. Scope and independently verified starting state
 
-Checkout: `C:/Users/Dhanwil/Desktop/Projects/Thesis_Prototype_Git`.
+Checkout: `<user-profile>/Desktop/Projects/Thesis_Prototype_Git`.
 Branch `main`; HEAD `6bded57d38e9b83ba718d7795b97e2130128c23f`; upstream `origin/main`.
 
 - `origin`: `https://github.com/LichSavant/Thesis_Protoype_Test.git`.

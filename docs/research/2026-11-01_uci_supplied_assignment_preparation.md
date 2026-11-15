@@ -8,7 +8,7 @@ actual-data execution. UCI D3/D6/D9 remain partial.
 
 ## Starting checkpoint and inspection
 
-Checkout: `C:/Users/Dhanwil/Desktop/Projects/Thesis_Prototype_Git`.
+Checkout: `<user-profile>/Desktop/Projects/Thesis_Prototype_Git`.
 Branch `main`; HEAD `6bded57d38e9b83ba718d7795b97e2130128c23f`;
 upstream `origin/main`.
 
@@ -175,7 +175,7 @@ All Python runs used `-B`, `PYTHONDONTWRITEBYTECODE=1`,
 `DATABASE_URL=sqlite:///:memory:` and `-p no:cacheprovider`.
 TEMP/TMP and all pytest basetemps were task-owned:
 
-`C:/Users/Dhanwil/AppData/Local/Temp/sebrl-uci-supplied-7hhbcvg3`.
+`<user-profile>/AppData/Local/Temp/sebrl-uci-supplied-7hhbcvg3`.
 
 The fixture contains ten synthetic development observations across five supplied
 mixed-target groups/folds and four reserved metadata-only assignments. It uses

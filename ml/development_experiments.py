@@ -20,9 +20,9 @@ from ml.notebook_contracts import (
     CONTRACT_VERSION, canonical_notebook_codebook, validate_feature_boundary,
 )
 
-DEVELOPMENT_FILES = {"Email": "email_development.csv", "PhiUSIIL": "phiusiil_development.csv",
+DEVELOPMENT_FILES = {"Email": "email_development.csv", "Web": "web_development.csv", "PhiUSIIL": "phiusiil_development.csv",
                      "UCI": "uci_development.csv"}
-BEHAVIORAL_FILES = {"Email": "email_sebrl_features.csv", "PhiUSIIL": "phiusiil_sebrl_features.csv",
+BEHAVIORAL_FILES = {"Email": "email_sebrl_features.csv", "Web": "web_sebrl_features.csv", "PhiUSIIL": "phiusiil_sebrl_features.csv",
                     "UCI": "uci_sebrl_features.csv"}
 CLASSIFIER_FAMILIES = ("logistic_regression", "linear_svm", "random_forest", "xgboost")
 METADATA = ("observation_id", "target", "group_id", "partition", "cv_fold")
@@ -80,7 +80,7 @@ class DevelopmentDataset:
 
     @property
     def configurations(self):
-        return ("E1", "E2", "E3") if self.specification.dataset == "Email" else ("U1",)
+        return ("E1", "E2", "E3") if self.specification.dataset in {"Email", "Web"} else ("U1",)
 
 
 @dataclass(frozen=True, slots=True)
@@ -147,7 +147,7 @@ def build_development_dataset(records: Iterable[Mapping], behavioral: Iterable[M
         values = tuple(_bit(vector[c]) for c in columns)
         if any(s > a for s, a in zip(values[:4], values[4:])):
             raise InputContractError("support_without_availability")
-        if specification.dataset != "Email" and any(values):
+        if specification.dataset not in {"Email", "Web"} and any(values):
             raise InputContractError("technical_behavioral_evidence_forbidden")
         selected = select_predictors(row, tuple(c.name for c in specification.conventional))
         conventional = []
@@ -242,10 +242,12 @@ def _read_csv(path: Path, expected_hash: str, *, behavioral: bool, specification
                     raise InputContractError("behavioral_csv_schema_mismatch")
             else:
                 required.update(("source_dataset", "source_row_id",
-                                 "Result" if specification.dataset == "UCI" else "label"))
+                                 "Result" if specification.dataset == "UCI" else "source_label" if specification.dataset == "Web" else "label"))
                 required.update(column.name for column in specification.conventional)
                 if specification.dataset == "Email":
                     required.update(("subject", "body"))
+                elif specification.dataset == "Web":
+                    required.update(("source_file", "html", "visible_text", "source_html_available", "source_visible_text_available"))
                 # Existing conventional handoffs retain extra source/audit fields.
                 # Only the explicit feature dictionary can select predictors.
                 if not required.issubset(headers):
@@ -257,7 +259,10 @@ def _read_csv(path: Path, expected_hash: str, *, behavioral: bool, specification
                 if supplied.get("partition") != "development":
                     raise InputContractError("reserved_records_in_development_file")
                 row = dict(supplied)
-                for column in ("target", "cv_fold") if behavioral else ("target", "cv_fold", "source_row_id", "label" if specification.dataset != "UCI" else "Result"):
+                integer_columns = ("target", "cv_fold") if behavioral else (
+                    ("target", "cv_fold", "source_row_id") if specification.dataset == "Web" else
+                    ("target", "cv_fold", "source_row_id", "label" if specification.dataset != "UCI" else "Result"))
+                for column in integer_columns:
                     value = row.get(column)
                     if type(value) is not str or not re.fullmatch(r"-?[0-9]+(?:\.0)?", value):
                         raise InputContractError("invalid_integer_csv_metadata")
@@ -269,11 +274,41 @@ def _read_csv(path: Path, expected_hash: str, *, behavioral: bool, specification
                             raise InputContractError("invalid_behavioral_csv_value")
                         row[column] = int(value in {"1", "True"})
                 else:
-                    if "source_label" in row:
+                    if "source_label" in row and specification.dataset != "Web":
                         value = row["source_label"]
                         if not re.fullmatch(r"-?[0-9]+", value):
                             raise InputContractError("invalid_integer_csv_metadata")
                         row["source_label"] = int(value)
+                    if specification.dataset == "Web":
+                        for field in ("html", "visible_text"):
+                            # CSV alone cannot distinguish None from known-empty.
+                            # Require explicit source bookkeeping; never select
+                            # these source_* fields as predictors.
+                            flag = row["source_" + field + "_available"]
+                            if flag not in {"0", "1", "False", "True"}:
+                                raise InputContractError("explicit_web_field_availability_required")
+                            if flag in {"0", "False"}:
+                                if row[field] != "":
+                                    raise InputContractError("web_unavailable_field_has_content")
+                                row[field] = None
+                    optional_fields = (("subject", "body", "sender", "reply_to", "headers", "urls") if specification.dataset == "Email"
+                                       else ("title", "page_url", "urls") if specification.dataset == "Web" else ())
+                    for field in optional_fields:
+                        flag_name = "source_"+field+"_available"
+                        if flag_name not in row:
+                            continue  # legacy handoffs retain their documented encoding
+                        flag = row[flag_name]
+                        if flag not in {"0", "1", "False", "True"} or field not in row:
+                            raise InputContractError("explicit_field_availability_required")
+                        if flag in {"0", "False"}:
+                            if row[field] != "":
+                                raise InputContractError("unavailable_field_has_content")
+                            row[field] = None
+                        elif field in {"headers", "urls"}:
+                            value = json.loads(row[field], object_pairs_hook=_manifest_object)
+                            if (field == "headers" and type(value) is not dict) or (field == "urls" and type(value) is not list):
+                                raise InputContractError("explicit_structured_source_encoding_required")
+                            row[field] = value
                     for column in specification.conventional:
                         if column.name not in row:
                             raise InputContractError("missing_predictor_field")

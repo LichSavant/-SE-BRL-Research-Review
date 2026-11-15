@@ -37,19 +37,22 @@ EMAIL_RESEARCH_REQUIREMENTS = (
 )
 
 
-def research_fit_gate() -> dict:
+def research_fit_gate(verified_run=None) -> dict:
     """Current Email admission gate; no filesystem reads or approval inference.
 
-    No accepted branch-evidence verifier or real-data research launcher exists.
-    Keep admission closed until that trusted verification path is implemented
-    against the accepted protocol. References, file existence, synthetic results
-    and arbitrary JSON/Boolean declarations cannot promote a requirement.
-    This is a research entry guard, not a sandbox for arbitrary Python callbacks.
+    A verified context comes only from the trusted operator's scoped artifact
+    verifier. No argument remains closed and performs no data discovery.
     """
-    return {"gate_version": RESEARCH_GATE_VERSION, "scope": "Email E1/E2/E3 research fitting",
+    if verified_run is not None:
+        require_research_fitting(verified_run)
+        return {"gate_version": RESEARCH_GATE_VERSION, "scope": "exact accepted development run",
+                "status": "PASS", "research_fitting_enabled": True,
+                "scientific_authorization_verified": True, "authorization_sha256": verified_run.authorization_sha256,
+                "final_evaluation_authorized": False}
+    return {"gate_version": RESEARCH_GATE_VERSION, "scope": "accepted development research fitting",
             "status": "FAIL", "research_fitting_enabled": False,
             "scientific_authorization_verified": False,
-            "reason": "accepted_branch_evidence_verifier_and_research_launcher_not_implemented",
+            "reason": "accepted_exact_run_evidence_not_supplied",
             "checks": [{"id": key, "requirement": title, "status": "FAIL",
                         "required_evidence": evidence, "reason": "accepted_branch_evidence_not_verified"}
                        for key, title, evidence in EMAIL_RESEARCH_REQUIREMENTS],
@@ -57,10 +60,13 @@ def research_fit_gate() -> dict:
             "reference_strings_authorize_research": False}
 
 
-def require_research_fitting() -> None:
-    """Fail closed for a future research entry point; never calls an estimator."""
+def require_research_fitting(verified_run=None) -> None:
+    """Typed verified context required; never accepts an approved=True flag."""
     from ml.experiment_inputs import InputContractError
-    raise InputContractError("research_fitting_not_authorized")
+    from ml.research_protocol import VerifiedResearchRun
+    if not isinstance(verified_run, VerifiedResearchRun):
+        raise InputContractError("research_fitting_not_authorized")
+    verified_run.require_verified()
 
 
 BASE = "experiments/"

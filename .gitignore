@@ -24,3 +24,11 @@ build/
 .idea/
 .DS_Store
 Thumbs.db
+# Sanitized review boundary: software only.
+/engineering_*/
+/experiments/data/
+/experiments/datasets-*/
+/experiments/results/
+/experiments/runs/
+*.log
+*.tsbuildinfo

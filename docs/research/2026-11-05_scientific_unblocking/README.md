@@ -123,10 +123,10 @@ scikit-learn 1.6.1, XGBoost 2.1.4, joblib 1.5.1, threadpoolctl 3.6.0.
 Scientific imports were independently verified. Host execution was needed for
 read access to these host-owned temporary packages, as recorded previously.
 
-`<T>` = `C:/Users/Dhanwil/AppData/Local/Temp/sebrl-scientific-unblocking-20261105-x12hng8_`.
+`<T>` = `<user-profile>/AppData/Local/Temp/sebrl-scientific-unblocking-20261105-x12hng8_`.
 Python tests set `TEMP=TMP=<T>`, `PYTHONDONTWRITEBYTECODE=1`,
 `DATABASE_URL=sqlite:///:memory:` and
-`PYTHONPATH=C:/Users/Dhanwil/AppData/Local/Temp/sebrl-genuine-approved-20261105/science`.
+`PYTHONPATH=<user-profile>/AppData/Local/Temp/sebrl-genuine-approved-20261105/science`.
 No application environment replacement or database write.
 
 | Executed check | Result |

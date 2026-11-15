@@ -46,31 +46,48 @@ def _versions(family):
             + (("xgboost",) if family == "xgboost" else ())}
 
 
-def save_fold_artifact(directory, classifier, *, code_reference):
+def _fold_payloads(classifier):
+    sio = _skops()
+    if classifier.model.family == "xgboost":
+        with tempfile.TemporaryDirectory(prefix="sebrl-native-model-") as temporary:
+            path = Path(temporary) / "model.json"
+            classifier.pipeline.named_steps["classifier"].save_model(path)
+            native = path.read_bytes()
+        return {"preprocess.skops": sio.dumps(classifier.pipeline.named_steps["preprocess"]), "model.json": native}
+    return {"pipeline.skops": sio.dumps(classifier.pipeline)}
+
+
+def serialized_fold_bytes(classifier):
+    """Actual encoded inference pipeline payload bytes, excluding manifests."""
+    if not isinstance(classifier, FoldClassifier) or classifier.pipeline is None:
+        raise InputContractError("fitted_fold_classifier_required")
+    return sum(len(v) for v in _fold_payloads(classifier).values())
+
+
+def save_fold_artifact(directory, classifier, *, code_reference, execution_context=None):
     """Exclusive leaf directory; payloads first/manifest last; ordinary IO rollback."""
     if not isinstance(classifier, FoldClassifier) or classifier.pipeline is None:
         raise InputContractError("fitted_fold_classifier_required")
     if type(code_reference) is not str or not code_reference.strip():
         raise InputContractError("code_reference_required")
+    if execution_context is not None:
+        from ml.preflight import require_research_fitting
+        require_research_fitting(execution_context)
+        if not execution_context._state.get("bound"):
+            raise InputContractError("research_run_not_bound")
     directory = Path(directory)
     if directory.exists() or not directory.parent.is_dir():
         raise InputContractError("unused_model_directory_and_existing_parent_required")
     sio = _skops()
     record = classifier.audit_record()
-    if classifier.model.family == "xgboost":
-        # The native wrapper writes only to this call's private temporary file.
-        with tempfile.TemporaryDirectory(prefix="sebrl-native-model-") as temporary:
-            path = Path(temporary) / "model.json"
-            classifier.pipeline.named_steps["classifier"].save_model(path)
-            native = path.read_bytes()
-        payloads = {"preprocess.skops": sio.dumps(classifier.pipeline.named_steps["preprocess"]), "model.json": native}
-    else:
-        payloads = {"pipeline.skops": sio.dumps(classifier.pipeline)}
+    payloads = _fold_payloads(classifier)
     for name, payload in payloads.items():
         if name.endswith(".skops") and set(sio.get_untrusted_types(data=payload)) - _reviewed_types():
             raise InputContractError("untrusted_model_types_rejected")
     manifest = {"version": PERSISTENCE_VERSION, "adapter_version": ADAPTER_VERSION,
-        "result_category": "SYNTHETIC RESULT", "research_execution": "BLOCKED",
+        "result_category": "SYNTHETIC RESULT" if execution_context is None else "RESEARCH RESULT",
+        "research_execution": "BLOCKED" if execution_context is None else "AUTHORIZED DEVELOPMENT ONLY",
+        "authorization_sha256": None if execution_context is None else execution_context.authorization_sha256,
         "code_reference": code_reference, "family": classifier.model.family, "configuration": classifier.configuration,
         "dictionary": {"dataset": classifier.dictionary.dataset,
             "columns": [{"name": c.name, "kind": c.kind} for c in classifier.dictionary.conventional],
@@ -119,7 +136,7 @@ def _safe_skops_load(sio, payload, limit):
         raise InputContractError("model_archive_invalid") from None
 
 
-def load_fold_artifact(directory, *, expected_manifest_sha256, max_bytes):
+def load_fold_artifact(directory, *, expected_manifest_sha256, max_bytes, execution_context=None):
     """Verify independent digest, fixed paths, sizes, versions and types before load.
 
     No approval flag or arbitrary trusted-type list is accepted. A malicious
@@ -138,8 +155,16 @@ def load_fold_artifact(directory, *, expected_manifest_sha256, max_bytes):
         manifest = json.loads(body, object_pairs_hook=_manifest_object)
         family = manifest["family"]
         require_dependencies(family)
+        if execution_context is not None:
+            from ml.preflight import require_research_fitting
+            require_research_fitting(execution_context)
+            scope_valid = (manifest["result_category"] == "RESEARCH RESULT"
+                           and manifest["research_execution"] == "AUTHORIZED DEVELOPMENT ONLY"
+                           and manifest.get("authorization_sha256") == execution_context.authorization_sha256)
+        else:
+            scope_valid = manifest["result_category"] == "SYNTHETIC RESULT" and manifest["research_execution"] == "BLOCKED"
         if (manifest["version"] != PERSISTENCE_VERSION or manifest["adapter_version"] != ADAPTER_VERSION
-                or manifest["result_category"] != "SYNTHETIC RESULT" or manifest["research_execution"] != "BLOCKED"
+                or not scope_valid
                 or manifest["versions"] != _versions(family)):
             raise InputContractError("model_version_or_scope_mismatch")
         expected = {"preprocess.skops", "model.json"} if family == "xgboost" else {"pipeline.skops"}

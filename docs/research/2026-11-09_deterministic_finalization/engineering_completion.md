@@ -41,7 +41,7 @@ Exact approved installation command (fresh destination existed only after this
 task created it):
 
 ```powershell
-.venv\Scripts\python -B -m pip install --target 'C:\Users\Dhanwil\AppData\Local\Temp\sebrl-finalization-approved-20261109\persistence' --only-binary :all: --no-deps --no-compile --no-cache-dir --retries 1 --disable-pip-version-check --report 'C:\Users\Dhanwil\AppData\Local\Temp\sebrl-finalization-approved-20261109\install_receipt.json' --requirement ml/requirements-persistence-synthetic.txt
+.venv\Scripts\python -B -m pip install --target '<user-profile>\AppData\Local\Temp\sebrl-finalization-approved-20261109\persistence' --only-binary :all: --no-deps --no-compile --no-cache-dir --retries 1 --disable-pip-version-check --report '<user-profile>\AppData\Local\Temp\sebrl-finalization-approved-20261109\install_receipt.json' --requirement ml/requirements-persistence-synthetic.txt
 ```
 
 Installation receipt SHA-256:
@@ -71,9 +71,9 @@ Environment used for host scientific tests (sandbox could not read the earlier
 host scientific install correctly; tests ran in the authorized host context):
 
 ```powershell
-$env:PYTHONPATH='C:\Users\Dhanwil\AppData\Local\Temp\sebrl-finalization-approved-20261109\persistence;C:\Users\Dhanwil\AppData\Local\Temp\sebrl-genuine-approved-20261105\science'
+$env:PYTHONPATH='<user-profile>\AppData\Local\Temp\sebrl-finalization-approved-20261109\persistence;<user-profile>\AppData\Local\Temp\sebrl-genuine-approved-20261105\science'
 $env:PYTHONDONTWRITEBYTECODE='1'
-$env:TEMP='C:\Users\Dhanwil\AppData\Local\Temp\sebrl-finalization-approved-20261109'
+$env:TEMP='<user-profile>\AppData\Local\Temp\sebrl-finalization-approved-20261109'
 $env:TMP=$env:TEMP
 $env:DATABASE_URL='sqlite:///:memory:'
 $env:OMP_NUM_THREADS='1'
@@ -140,7 +140,7 @@ and exact calibrated prediction/threshold identity. No selected final model or
 research outcome was generated.
 
 Final retained task storage:
-`C:\Users\Dhanwil\AppData\Local\Temp\sebrl-finalization-approved-20261109\verified_nested_lr_v2`.
+`<user-profile>\AppData\Local\Temp\sebrl-finalization-approved-20261109\verified_nested_lr_v2`.
 Completion manifest SHA-256:
 `042a2afd07497e13604c9fb94958262e6320f2a5f4db4f45304088ac64d1dabd`.
 The earlier `verified_nested_lr` bundle with manifest

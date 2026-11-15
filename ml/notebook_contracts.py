@@ -18,11 +18,14 @@ from ml.se_brl.codebook import load_codebook
 
 PREPARATION_RUN_ID = "paper-preparation-v1"
 CONTRACT_VERSION = "notebook-boundary-0.1.0"
-DATASET_ROLES = {"Email": "Email-E1/E2/E3", "PhiUSIIL": "U1-Ph", "UCI": "U1-UCI"}
+DATASET_ROLES = {"Email": "Email-E1/E2/E3", "Web": "Web-E1/E2/E3", "PhiUSIIL": "U1-Ph", "UCI": "U1-UCI"}
 EMAIL_SOURCES = ("Nazario", "Enron", "SpamAssassin")
 LABEL_MAPPINGS = {
     "Nazario": {1: 1}, "Enron": {0: 0}, "SpamAssassin": {0: 0},
     "PhiUSIIL": {0: 1, 1: 0}, "UCI Phishing Websites": {-1: 1, 1: 0},
+    # Zenodo 8041387 explicitly documents these class-file roles. Retain the
+    # producer's textual class names, not an invented numeric native label.
+    "Phishing Website Dataset": {"phishing": 1, "legitimate": 0},
 }
 
 
@@ -83,27 +86,32 @@ def capture_population(records: Iterable[Mapping], *, dataset: str) -> dict[str,
     if dataset not in DATASET_ROLES:
         raise InputContractError("dataset_not_in_approved_notebook_scope")
     allowed = set(EMAIL_SOURCES) if dataset == "Email" else {
-        "PhiUSIIL" if dataset == "PhiUSIIL" else "UCI Phishing Websites"}
+        {"Web": "Phishing Website Dataset", "PhiUSIIL": "PhiUSIIL", "UCI": "UCI Phishing Websites"}[dataset]}
     result = {}
     positions = set()
     for row in records:
         if not isinstance(row, Mapping):
             raise InputContractError("record_mapping_required")
         source = row.get("source_dataset")
-        native = row.get("label" if dataset != "UCI" else "Result")
+        native = row.get("source_label" if dataset == "Web" else "label" if dataset != "UCI" else "Result")
         target, position, oid = row.get("target"), row.get("source_row_id"), row.get("observation_id")
-        if type(source) is not str or source not in allowed or type(native) is not int or native not in LABEL_MAPPINGS[source]:
+        native_type = str if dataset == "Web" else int
+        if type(source) is not str or source not in allowed or type(native) is not native_type or native not in LABEL_MAPPINGS[source]:
             raise InputContractError("invalid_source_target_mapping")
         if type(target) is not int or target != LABEL_MAPPINGS[source][native]:
             raise InputContractError("invalid_source_target_mapping")
-        if "source_label" in row and (type(row["source_label"]) is not int or row["source_label"] != native):
+        if "source_label" in row and (type(row["source_label"]) is not native_type or row["source_label"] != native):
             raise InputContractError("native_label_not_preserved")
         if type(position) is not int or position < 0:
             raise InputContractError("invalid_source_position")
-        if type(oid) is not str or not oid.strip() or oid in result or (source, position) in positions:
+        source_file = row.get("source_file") if dataset == "Web" else None
+        if dataset == "Web" and source_file != {"phishing": "phishing.csv", "legitimate": "not-phishing.csv"}[native]:
+            raise InputContractError("web_native_class_file_mismatch")
+        locator = (source, source_file, position) if dataset == "Web" else (source, position)
+        if type(oid) is not str or not oid.strip() or oid in result or locator in positions:
             raise InputContractError("invalid_or_duplicate_observation_id")
-        result[oid] = (source, position, native, target)
-        positions.add((source, position))
+        result[oid] = (source, source_file, position, native, target) if dataset == "Web" else (source, position, native, target)
+        positions.add(locator)
     if not result or {value[-1] for value in result.values()} != {0, 1}:
         raise InputContractError("nonempty_binary_population_required")
     return result
@@ -146,6 +154,14 @@ def validate_feature_boundary(records, *, dataset: str, expected_population=None
                 raise InputContractError("missing_required_email_fields")
             for field in ("subject", "body", "sender", "receiver"):
                 _text_availability(row.get(field))
+            _language(row.get("language"))
+        elif dataset == "Web":
+            if not {"html", "visible_text"}.issubset(row):
+                raise InputContractError("explicit_web_evidence_availability_required")
+            for field in ("html", "visible_text"):
+                _text_availability(row[field])
+            if all(row[field] is None for field in ("html", "visible_text")):
+                raise InputContractError("content_bearing_web_evidence_required")
             _language(row.get("language"))
     counts = validate_supplied_partitions(assignments, folds=5)
     expected_parts = {"development"} if development_only else {"development", "calibration", "test"}

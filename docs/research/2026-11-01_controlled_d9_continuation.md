@@ -6,7 +6,7 @@ and this new report changed. All other work remains preserved.
 
 ## Repository state and scope
 
-Checkout: `C:/Users/Dhanwil/Desktop/Projects/Thesis_Prototype_Git`.
+Checkout: `<user-profile>/Desktop/Projects/Thesis_Prototype_Git`.
 Branch/HEAD: `main`, `6bded57d38e9b83ba718d7795b97e2130128c23f`.
 Upstream remains `origin/main`. Configured remotes remain:
 
@@ -93,7 +93,7 @@ Python: existing `.venv`, Python 3.12.10, pytest 8.4.2. All Python commands used
 root. TEMP/TMP pointed there. `DATABASE_URL=sqlite:///:memory:` was set before
 test imports, keeping the persistent application database out of the test path.
 The task root was
-`C:/Users/Dhanwil/AppData/Local/Temp/sebrl-d9-hardening-rqrdx_qi`;
+`<user-profile>/AppData/Local/Temp/sebrl-d9-hardening-rqrdx_qi`;
 `<task-temp>` in the commands below denotes that exact directory.
 
 | Check | Command, with common options above | Actual result |

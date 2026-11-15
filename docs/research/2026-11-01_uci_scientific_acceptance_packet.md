@@ -18,7 +18,7 @@ requirement is introduced.
 
 ## 1. Scope, repository state and evidence rules
 
-Checkout: `C:/Users/Dhanwil/Desktop/Projects/Thesis_Prototype_Git`.
+Checkout: `<user-profile>/Desktop/Projects/Thesis_Prototype_Git`.
 Branch `main`; HEAD `6bded57d38e9b83ba718d7795b97e2130128c23f`;
 configured upstream `origin/main`.
 

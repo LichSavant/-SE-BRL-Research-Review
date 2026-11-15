@@ -112,8 +112,8 @@ predictions describe artificial fixtures only. No historical output was replaced
 
 Task storage shorthand:
 
-- `<T>` = `C:/Users/Dhanwil/AppData/Local/Temp/sebrl-deterministic-20261105-btjhvbvt`.
-- `<S>` = `C:/Users/Dhanwil/AppData/Local/Temp/sebrl-genuine-approved-20261105`.
+- `<T>` = `<user-profile>/AppData/Local/Temp/sebrl-deterministic-20261105-btjhvbvt`.
+- `<S>` = `<user-profile>/AppData/Local/Temp/sebrl-genuine-approved-20261105`.
 - Scientific runs set `PYTHONPATH=<S>/science`, `TEMP=TMP=<S>`,
   `PYTHONDONTWRITEBYTECODE=1`, `DATABASE_URL=sqlite:///:memory:`.
 - Other Python tests used `<T>` with the same bytecode/database protections.

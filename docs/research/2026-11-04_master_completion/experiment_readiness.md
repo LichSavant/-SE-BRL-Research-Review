@@ -70,7 +70,7 @@ Common Python environment:
 `PYTHONDONTWRITEBYTECODE=1`, `DATABASE_URL=sqlite:///:memory:`,
 `TEMP/TMP=<task-temp>`; pytest uses `-p no:cacheprovider` and unique basetemps.
 Task temporary directory:
-`C:/Users/Dhanwil/AppData/Local/Temp/sebrl-master-20261104-xiwva8k4`.
+`<user-profile>/AppData/Local/Temp/sebrl-master-20261104-xiwva8k4`.
 Existing .venv Python 3.12.10 / pytest 8.4.2; scientific packages absent. No install.
 
 | Command | Result |
